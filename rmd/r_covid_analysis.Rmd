@@ -1,0 +1,188 @@
+---
+title: "Finals: Analysis of Covid Dataset"
+author: "Ayesha Mendoza"
+date: "2024-06-02"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+## Description:
+
+Below is a high level data exploration and analysis of COVID-19 data.
+
+#### Data Source:
+
+Datasets were extracted from John Hopkins' github repository:
+
+https://github.com/CSSEGISandData/COVID-19
+More information on the dataset can be found at this repo.
+
+
+#### Data Exploration/Questions to Answer:
+
+- Can we find any temporal trends in our data
+- Which continent had the highest incidents of COVID-19
+
+
+#### Some Feature Engineering/data processing done:
+
+- Added the continent information using countrycode package.  I used this feature for analysis to be able to break down COVID-19 incidents by continent.
+  
+  
+#### Potential Biases in the data:
+
+  As I was working on this analysis, it is important for me to be mindful that there are potential
+  biases in the data, and that possible recording/reporting and demographic biases are likely.
+  
+  - Recording and reporting bias - are all incidents reported and recorded?  Unreported or unrecorded incidents could skew the counts.  Misdiagnosed patients/ fatalities could impact count accuracy. 
+  
+  - Demographic bias - are there certain racial or age groups more likely to reported.
+
+```{r}
+# Load libraries
+# Install necessary packages if not already installed
+if (!require("countrycode")) install.packages("countrycode", repos = "https://cloud.r-project.org/")
+if (!require("forecast")) install.packages("forecast", repos = "https://cloud.r-project.org/")
+
+library(tidyverse)
+library(lubridate)
+
+# Define URLs
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+file_names <- c("time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_global.csv", "time_series_covid19_confirmed_US.csv", "time_series_covid19_deaths_US.csv")
+urls <- str_c(url_in, file_names)
+
+# Read the datasets
+global_cases <- read_csv(urls[1])
+global_deaths <- read_csv(urls[2])
+US_cases <- read_csv(urls[3])
+US_deaths <- read_csv(urls[4])
+
+# Transform the global cases data to long format
+date_columns <- names(global_cases)[5:ncol(global_cases)]
+global_cases_long <- global_cases %>%
+  pivot_longer(cols = all_of(date_columns),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-Lat, -Long) %>%
+  rename(Country_Region = `Country/Region`,
+         Province_State = `Province/State`)
+
+# Transform the global deaths data to long format
+date_columns <- names(global_deaths)[5:ncol(global_deaths)]
+global_deaths_long <- global_deaths %>%
+  pivot_longer(cols = all_of(date_columns),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-Lat, -Long) %>%
+  rename(Country_Region = `Country/Region`,
+         Province_State = `Province/State`)
+
+# Merge the global cases and deaths data
+global <- global_cases_long %>%
+  full_join(global_deaths_long, by = c("Province_State", "Country_Region", "date")) %>%
+  mutate(date = mdy(date))
+
+# Display the head of the merged dataset
+head(global)
+```
+```{r cases_by_country}
+# Summarize total cases by country
+total_cases_by_country <- global %>%
+  group_by(Country_Region) %>%
+  summarise(total_cases = sum(cases, na.rm = TRUE)) %>%
+  arrange(desc(total_cases))
+
+# Plot total cases by country
+# ggplot(total_cases_by_country, aes(x = reorder(Country_Region, -total_cases), y = total_cases)) +
+#   geom_bar(stat = "identity") +
+#   coord_flip() +
+#   labs(title = "Total COVID-19 Cases by Country",
+#        x = "Country",
+#        y = "Total Cases") +
+#   theme_minimal()
+```
+```{r}
+# Aggregate total cases by date
+global_cases_by_date <- global %>%
+  group_by(date) %>%
+  summarise(total_cases = sum(cases, na.rm = TRUE)) %>%
+  arrange(date)
+
+
+print(
+  ggplot(global_cases_by_date, aes(x = date, y = total_cases)) +
+    geom_line(color = "blue") +
+    labs(title = "Total COVID-19 Cases Globally Over Time",
+         x = "Date",
+         y = "Total Cases") +
+    theme_minimal()
+)
+```
+```{r}
+# Add continent information using the countrycode package
+global <- global %>%
+  mutate(Continent = countrycode(Country_Region, origin = "country.name", destination = "continent"))
+
+# Summarize total cases by continent and date
+global_cases_by_continent <- global %>%
+  group_by(Continent, date) %>%
+  summarise(total_cases = sum(cases, na.rm = TRUE)) %>%
+  arrange(date)
+
+# Plot total cases by continent over time
+ggplot(global_cases_by_continent, aes(x = date, y = total_cases, color = Continent)) +
+  geom_line() +
+  labs(title = "Total COVID-19 Cases by Continent Over Time",
+       x = "Date",
+       y = "Total Cases") +
+  theme_minimal()
+```
+```{r}
+# Summarize total cases by continent
+total_cases_by_continent <- global %>%
+  group_by(Continent) %>%
+  summarise(total_cases = sum(cases, na.rm = TRUE)) %>%
+  arrange(desc(total_cases))
+
+print(
+  ggplot(total_cases_by_continent, aes(x = reorder(Continent, -total_cases), y = total_cases, fill = Continent)) +
+    geom_bar(stat = "identity") +
+    labs(title = "Total COVID-19 Cases by Continent",
+         x = "Continent",
+         y = "Total Cases") +
+    theme_minimal() +
+    theme(legend.position = "none")
+)
+```
+```{r}
+# Summarize total cases by date
+global_cases_by_date <- global %>%
+  group_by(date) %>%
+  summarise(total_cases = sum(cases, na.rm = TRUE)) %>%
+  arrange(date)
+
+# Convert the data to a time series object
+ts_global_cases <- ts(global_cases_by_date$total_cases, start = c(year(min(global_cases_by_date$date)), month(min(global_cases_by_date$date))), frequency = 365)
+
+# Fit an ARIMA model
+fit <- auto.arima(ts_global_cases)
+
+# Forecast for the next 12 months (365 days)
+forecasted_cases <- forecast(fit, h = 365)
+
+# Plot the forecast
+autoplot(forecasted_cases) +
+  labs(title = "Forecasted Global COVID-19 Cases for the Next 12 Months",
+       x = "Date",
+       y = "Total Cases") +
+  theme_minimal()
+```
+
+```{r sessioninfo}
+sessionInfo()
+
+```
+

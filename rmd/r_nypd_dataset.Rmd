@@ -1,0 +1,215 @@
+---
+title: "Week 3 Assignment: NYPD Shooting Incident Analysis"
+date: "2024-05-28"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Description:
+
+Below is a high level data exploration and analysis using the NYPD Shooting Incident Historical dataset.
+
+#### Data Source:
+
+Historic NYPD Shooting Incident was downloaded from:
+https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic
+
+##### Description of Dataset:
+List of every shooting incident that occurred in NYC going back to 2006 through the end of the previous calendar year.
+
+This is a breakdown of every shooting incident that occurred in NYC going back to 2006 through the end of the previous calendar year. This data is manually extracted every quarter and reviewed by the Office of Management Analysis and Planning before being posted on the NYPD website. Each record represents a shooting incident in NYC and includes information about the event, the location and time of occurrence. In addition, information related to suspect and victim demographics is also included. 
+
+*more information is available in the URL provided above.
+
+#### Some of the questions I wish to answer are:
+
+- Which Borough has the most incidents?
+- Which Jurisdiction handles the most incidents?
+- Can we tell which age group perpetrators belong to?
+- Do the incidents occur mostly inside or outside?
+- From the data available, can we predict the number of shooting incidents for the next year?
+
+#### Some filtering and data processing done:
+
+  NA's were excluded/filtered out from the counts
+  
+  
+#### Potential Biases in the data:
+
+  As I was working on this analysis, it is important for me to be mindful that there are potential
+  biases in the data, and that possible recording/reporting and demographic biases are likely.
+  
+  - Recording and reporting bias - are all incidents reported and recorded?  Unreported or unrecorded incidents could skew the counts.
+  
+  - Demographic bias - are there certain racial or age groups more likely to be stopped / arrested?
+
+
+```{r import}
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(lubridate)
+library(tidyr)
+
+# Install library for timeseries forecast used for modeling
+if (!requireNamespace("forecast", quietly = TRUE)) {
+  install.packages("forecast")
+}
+library(forecast)
+```
+
+```{r nypd}
+filename <- "../data/NYPD_Shooting_Incident_Data__Historic_.csv"
+nypd <- read_csv(filename)
+```
+```{r}
+boro_counts <- nypd %>%
+  group_by(BORO) %>%
+  summarise(count = n())
+
+# Calculate the count of incidents per jurisdiction code
+jurisdiction_counts <- nypd %>%
+  group_by(JURISDICTION_CODE) %>%
+  summarise(count = n())
+```
+
+###### Which Borough has the most incidents?:
+
+- From the plot below, we can see the Brooklyn has the most number of incidents
+
+```{r}
+ggplot(boro_counts, aes(x = BORO, y = count)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_minimal() +
+  labs(title = "Count of Incidents per Borough",
+       x = "Borough",
+       y = "Count of Incidents")
+```
+
+###### Which Jurisdiction handles the most incidents?:
+
+- The Jurisdiction corresponding to Jurisdiction 0 appears to handle the most incidents.
+
+```{r}
+ggplot(jurisdiction_counts, aes(x = JURISDICTION_CODE, y = count)) +
+  geom_bar(stat = "identity", fill = "darkorange") +
+  theme_minimal() +
+  labs(title = "Count of Incidents per Jurisdiction Code",
+       x = "Jurisdiction Code",
+       y = "Count of Incidents")
+```
+
+###### Can we tell which age group perpetrators belong to?
+
+We have a large number of incidents with 'UNKNOWN', we cannot tell with absolute certainty which age group most perpetrators belong to.  It is surprising in either case that there are a large number of perpetrators in the younger age bracket: 18-24, even in the <18 bracket.  I am curious how they get access to guns/firearms.
+
+```{r}
+# Move all rows with invalid age group into an 'unknown' bucket
+nypd <- nypd %>%
+  mutate(PERP_AGE_GROUP = ifelse(PERP_AGE_GROUP %in% c('<18', '18-24', '25-44', '45-64', '65+'), PERP_AGE_GROUP, 'unknown'))
+
+age_group_counts <- nypd %>%
+  group_by(PERP_AGE_GROUP) %>%
+  summarise(count = n())
+
+# Barplot of count of incidents per PERP_AGE_GROUP
+ggplot(age_group_counts, aes(x = PERP_AGE_GROUP, y = count)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  theme_minimal() +
+  labs(title = "Count of Incidents per Perpetrator Age Group",
+       x = "Perpetrator Age Group",
+       y = "Count of Incidents") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+
+###### Do the incidents occur mostly inside or outside?
+
+- It looks like incidents are most likely to occur outside. But since we have a lot of NA's in this column, we cannot tell with absolute certainty if this is truly the case.
+
+```{r location_of_occurrence}
+loc_counts <- nypd %>%
+  filter(!is.na(LOC_OF_OCCUR_DESC)) %>%
+  group_by(LOC_OF_OCCUR_DESC) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count))
+
+ggplot(loc_counts, aes(x = reorder(LOC_OF_OCCUR_DESC, -count), y = count)) +
+  geom_bar(stat = "identity", fill = "purple") +
+  theme_minimal() +
+  labs(title = "Count of Occurrences per Location of Occurrence Description",
+       x = "Location of Occurrence Description",
+       y = "Count of Occurrences") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+###### Can we find trends in shooting incidents throughout the years?
+
+- In the overall plot, we can observe a spike in shooting incidents from 2021 through 2022, which was around the pandemic.
+
+```{r timeseries}
+set.seed(0)
+
+# Convert OCCUR_DATE to Date format
+nypd$OCCUR_DATE_MM <- as.Date(nypd$OCCUR_DATE, format="%m/%d/%Y")
+
+# Aggregate the number of incidents by month/year
+nypd$OCCUR_DATE_MM <- floor_date(nypd$OCCUR_DATE_MM, "month")
+incidents_by_month <- nypd %>%
+  group_by(OCCUR_DATE_MM) %>%
+  summarise(Incidents = n())
+
+# Plot overall time series of incidents by month/year
+ggplot(incidents_by_month, aes(x = OCCUR_DATE_MM, y = Incidents)) +
+  geom_line() +
+  labs(title = 'Number of Incidents by Month/Year (Overall)', x = 'Date', y = 'Number of Incidents') +
+  scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+  theme_minimal()
+
+```
+###### Can we generate a Time Series model that will predict the number of shooting incidents for the next 12 months?
+
+Below is a code which generates a model using ARIMA, which uses data from the past and uses the pattern it finds to predict the future.
+
+```{r}
+
+# Create a time series object
+incidents_ts <- ts(incidents_by_month$Incidents, start = c(year(min(incidents_by_month$OCCUR_DATE_MM)), month(min(incidents_by_month$OCCUR_DATE_MM))), frequency = 12)
+
+# Fit an ARIMA model
+fit <- auto.arima(incidents_ts)
+
+```
+```{r}
+# Forecast the next year (12 months)
+  forecast_next_year <- forecast(fit, h = 12)
+  
+  # Convert forecast to data frame
+  forecast_df <- data.frame(
+    Date = seq(as.Date(tail(incidents_by_month$OCCUR_DATE_MM, 1)) %m+% months(1), by = "month", length.out = 12),
+    Point_Forecast = forecast_next_year$mean,
+    Lo80 = forecast_next_year$lower[,1],
+    Hi80 = forecast_next_year$upper[,1],
+    Lo95 = forecast_next_year$lower[,2],
+    Hi95 = forecast_next_year$upper[,2]
+  )
+  
+  # Plot the forecast
+  ggplot() +
+    geom_line(data = incidents_by_month, aes(x = OCCUR_DATE_MM, y = Incidents), color = 'blue') +
+    geom_line(data = forecast_df, aes(x = Date, y = Point_Forecast), color = 'red') +
+    geom_ribbon(data = forecast_df, aes(x = Date, ymin = Lo80, ymax = Hi80), alpha = 0.2, fill = 'orange') +
+    geom_ribbon(data = forecast_df, aes(x = Date, ymin = Lo95, ymax = Hi95), alpha = 0.1, fill = 'yellow') +
+    scale_x_date(date_breaks = "2 years", date_labels = "%Y") +
+    labs(title = 'Forecast of Incidents for the Next Year', x = 'Date', y = 'Number of Incidents') +
+    theme_minimal()
+```
+
+
+
+```{r sessioninfo}
+sessionInfo()
+
+```
+
