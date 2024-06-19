@@ -3,8 +3,8 @@ title: "Finals: Analysis of Covid Dataset"
 author: "Ayesha Mendoza"
 date: "2024-06-02"
 output:
-  html_document: default
   pdf_document: default
+  html_document: default
 ---
 
 
@@ -181,6 +181,19 @@ autoplot(forecasted_cases) +
   theme_minimal()
 ```
 
+#### Summary / Potential Biases in the data:
+
+We can see from the plots that Europe had the most number of cases, followed by the Americas and Asia.
+It would be good to compare these numbers with the total population in those regions to get the actual proportion of the number of cases by continent.
+
+
+As I was working on this analysis, it was important for me to be mindful that there are potential
+biases in the data, and that possible recording/reporting and demographic biases are likely.
+  
+  - Recording and reporting bias - are all incidents reported and recorded?  Unreported or unrecorded incidents could skew the counts.  Misdiagnosed patients/ fatalities could impact count accuracy. 
+  
+  - Demographic bias - are there certain racial or age groups more likely to reported.
+  
 ```{r sessioninfo}
 sessionInfo()
 
